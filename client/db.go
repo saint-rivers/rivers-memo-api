@@ -6,7 +6,6 @@ import (
 	"rivers-memo-cli/config"
 )
 
-
 func InitDatabase() *sql.DB {
 	connStr := config.Envget("POSTGRES_URL")
 	db, err := sql.Open("postgres", connStr)
@@ -16,4 +15,3 @@ func InitDatabase() *sql.DB {
 	}
 	return db
 }
-

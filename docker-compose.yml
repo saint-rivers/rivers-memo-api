@@ -1,0 +1,8 @@
+services:
+  app:
+    image: rivers-listener:v1
+    container_name: rivers-listener
+    restart: unless-stopped
+    build: .
+    ports:
+      - 5051:5050
