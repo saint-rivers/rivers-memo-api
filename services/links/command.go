@@ -9,6 +9,9 @@ import (
 type MemoParams struct {
 	ID             int
 	ChannelMessage string
+	Title          string
+	Description    string
+	Image          string
 }
 
 type TagParams struct {
@@ -36,17 +39,41 @@ func AppendTag(ctx context.Context, db *sql.DB, params *TagParams) error {
 }
 
 func CreateMemo(ctx context.Context, db *sql.DB, params *MemoParams) error {
-	query := "INSERT INTO note(id, link) VALUES($1, $2)"
-	insert, err := db.ExecContext(ctx, query, params.ID, params.ChannelMessage)
+	query := `
+	INSERT INTO note(id, link, title, description, image_url) 
+	VALUES($1, $2, $3, $4, $5)`
+
+	insert, err := db.ExecContext(
+		ctx,
+		query,
+		params.ID,
+		params.ChannelMessage,
+		params.Title,
+		params.Description,
+		params.Image,
+	)
 	if err != nil {
-		log.Println("insert into 'note' error: %s", err)
+		log.Printf("insert into 'note' error: %s", err)
 		return err
 	}
 	rows, err := insert.RowsAffected()
 	if err != nil {
-		log.Println("unable to read insert results: %s", err)
+		log.Printf("unable to read insert results: %s", err)
 		return err
 	}
 	log.Printf("rows inserted: %d", rows)
+	return nil
+}
+
+func UpdateMemo(ctx context.Context, db *sql.DB, image *string, title *string, desc *string, link string) error {
+	q := `
+	update note set title = $1, description = $2, image_url = $3 
+	where link = $4`
+
+	_, err := db.Exec(q, title, desc, image, link)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
 	return nil
 }

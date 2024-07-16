@@ -35,7 +35,12 @@ func main() {
 	links.ConfigRoutes(e, db)
 
 	go listenTelegram(bot, db)
-	e.Logger.Fatal(e.Start(PORT))
+	err := e.Start(PORT)
+	if err != nil {
+		e.Logger.Fatal(err)
+		<-exit
+		return
+	}
 	<-exit
 }
 
@@ -44,7 +49,6 @@ func listenTelegram(bot *tgbotapi.BotAPI, db *sql.DB) {
 	u.Timeout = 30
 
 	updates := bot.GetUpdatesChan(u)
-
 	for update := range updates {
 		// log.Printf("LOGGING: [%s]", update.ChannelPost.Text)
 		err := links.ProcessChanncelMessage(db, &links.CreateLinkMemoParams{

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	pb "rivers-memo-cli/generated/memo"
 )
 
 type TagSearchParam struct {
@@ -25,7 +26,7 @@ func ReadMessageByRelativeIndex(ctx context.Context, db *sql.DB, params *MemoRea
 	var id int
 	if err := db.QueryRowContext(ctx, query, params.Offset).Scan(&id); err != nil {
 		if err == sql.ErrNoRows {
-			return id, fmt.Errorf("Not found")
+			return id, fmt.Errorf("not found")
 		}
 		return id, err
 	}
@@ -72,4 +73,39 @@ func buildQuery(q string, size int) string {
 		}
 	}
 	return q
+}
+
+func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
+	q := `
+	SELECT id, link, title, description, image_url 
+	FROM note 
+	WHERE id < $1
+	ORDER BY id desc 
+	LIMIT $2`
+
+	rows, err := db.Query(q, req.Last, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var memos []pb.MemoReply
+	for rows.Next() {
+		var m Memo
+		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl); err != nil {
+			return nil, err
+		}
+		memos = append(
+			memos,
+			pb.MemoReply{
+				Id:          m.ID,
+				Link:        m.Link,
+				Tags:        nil,
+				Title:       m.Title,
+				Description: m.Description,
+				ImageUrl:    m.ImageUrl,
+			},
+		)
+	}
+	return memos, nil
 }
