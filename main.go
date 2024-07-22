@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"rivers-memo-cli/client"
 	"rivers-memo-cli/services/links"
+	"rivers-memo-cli/services/tags"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/labstack/echo/v4"
@@ -33,6 +34,7 @@ func main() {
 		return c.JSON(http.StatusOK, map[string]string{"status": "up"})
 	})
 	links.ConfigRoutes(e, db)
+	tags.ConfigRoutes(e, db)
 
 	go listenTelegram(bot, db)
 	err := e.Start(PORT)
