@@ -48,11 +48,22 @@ func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 			last = "999999"
 		}
 
-		memos, err := GetMemos(
-			context.Background(),
-			db,
-			&pb.PageRequest{Last: &last, Size: size},
-		)
+		tags := c.QueryParams()["tag"]
+		var memos []pb.MemoReply
+		if len(tags) == 0 {
+			memos, err = GetMemos(
+				context.Background(),
+				db,
+				&pb.PageRequest{Last: &last, Size: size, Tags: []string{}},
+			)
+		} else {
+			memos, err = GetMemosWithTagFilter(
+				context.Background(),
+				db,
+				&pb.PageRequest{Last: &last, Size: size, Tags: tags},
+			)
+		}
+
 		if err != nil {
 			log.Println(err.Error())
 		}

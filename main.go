@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"rivers-memo-cli/client"
+	"rivers-memo-cli/config"
 	"rivers-memo-cli/services/links"
 	"rivers-memo-cli/services/tags"
 
@@ -18,6 +19,7 @@ import (
 var exit = make(chan bool)
 
 const PORT = ":5050"
+const DIST = "ui"
 
 func main() {
 	bot := client.InitTelegramBot()
@@ -26,15 +28,12 @@ func main() {
 	log.Printf("Telegram authorized on account %s", bot.Self.UserName)
 
 	e := echo.New()
-	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:4200", "http://localhost"},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
-	}))
-	e.GET("/status", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "up"})
-	})
-	links.ConfigRoutes(e, db)
-	tags.ConfigRoutes(e, db)
+	e = configureRestApi(e, db)
+
+	// the production build serves the built html files from angular
+	if config.Envget("MODE") == "prod" {
+		e.Static("/", "ui")
+	}
 
 	go listenTelegram(bot, db)
 	err := e.Start(PORT)
@@ -44,6 +43,19 @@ func main() {
 		return
 	}
 	<-exit
+}
+
+func configureRestApi(e *echo.Echo, db *sql.DB) *echo.Echo {
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"http://localhost:4200", "http://localhost"},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
+	}))
+	e.GET("/status", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "up"})
+	})
+	links.ConfigRoutes(e, db)
+	tags.ConfigRoutes(e, db)
+	return e
 }
 
 func listenTelegram(bot *tgbotapi.BotAPI, db *sql.DB) {

@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	pb "rivers-memo-cli/generated/memo"
+	"strconv"
+
+	"github.com/lib/pq"
 )
 
 type TagSearchParam struct {
@@ -75,24 +78,82 @@ func buildQuery(q string, size int) string {
 	return q
 }
 
-func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
-	q := `
-	SELECT id, link, title, description, image_url 
-	FROM note 
-	WHERE id < $1
-	ORDER BY id desc 
-	LIMIT $2`
+func placeholders(n int) string {
+	offset := 3
+	ps := ""
+	for i := 0 + offset; i < n+offset; i++ {
+		ps += "$" + strconv.Itoa(i)
+		if i < n+offset-1 {
+			ps += ","
+		}
+	}
+	return ps
+}
+func unpackArray[S ~[]E, E any](s S) []any {
+	r := make([]any, len(s))
+	for i, e := range s {
+		r[i] = e
+	}
+	return r
+}
 
-	rows, err := db.Query(q, req.Last, req.Size)
+func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
+	q := `
+			SELECT DISTINCT id, link, title, description, image_url, ''
+			FROM note_tag nt
+			JOIN note n ON n.id = nt.note
+			WHERE id < $1
+			AND tag = ANY($2)
+			ORDER BY id desc
+			LIMIT $3`
+	rows, err := db.Query(q, req.Last, pq.Array(req.Tags), req.Size)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var memos []pb.MemoReply
+
 	for rows.Next() {
 		var m Memo
-		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl); err != nil {
+		var tag string
+		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
+			return nil, err
+		}
+		memos = append(
+			memos,
+			pb.MemoReply{
+				Id:          m.ID,
+				Link:        m.Link,
+				Tags:        nil,
+				Title:       m.Title,
+				Description: m.Description,
+				ImageUrl:    m.ImageUrl,
+			},
+		)
+	}
+	return memos, nil
+}
+
+func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
+	q := `
+			SELECT id, link, title, description, image_url, ''
+			FROM note
+			WHERE id < $1
+			ORDER BY id desc
+			LIMIT $2`
+
+	rows, err := db.Query(q, req.Last, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var memos []pb.MemoReply
+
+	for rows.Next() {
+		var m Memo
+		var tag string
+		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
 			return nil, err
 		}
 		memos = append(

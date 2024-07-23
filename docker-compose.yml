@@ -5,4 +5,4 @@ services:
     restart: unless-stopped
     build: .
     ports:
-      - 5051:5050
+      - 9090:5050
