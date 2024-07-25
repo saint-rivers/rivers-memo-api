@@ -3,17 +3,19 @@ package main
 import (
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"rivers-memo-cli/client"
 	"rivers-memo-cli/config"
+	pb "rivers-memo-cli/generated/memo"
 	"rivers-memo-cli/services/links"
 	"rivers-memo-cli/services/tags"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-
 	_ "github.com/lib/pq"
+	"google.golang.org/grpc"
 )
 
 var exit = make(chan bool)
@@ -29,6 +31,7 @@ func main() {
 
 	e := echo.New()
 	e = configureRestApi(e, db)
+	// configureGrpcServer()
 
 	// the production build serves the built html files from angular
 	if config.Envget("MODE") == "prod" {
@@ -43,6 +46,21 @@ func main() {
 		return
 	}
 	<-exit
+}
+
+func configureGrpcServer() {
+	lis, err := net.Listen("tcp", ":50051")
+	if err != nil {
+		log.Fatalf("failed to listen on port 50051: %v", err)
+	}
+
+	s := grpc.NewServer()
+	server := &links.MemoServer{}
+	pb.RegisterMemoServiceServer(s, server)
+	log.Printf("gRPC server listening at %v", lis.Addr())
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
 }
 
 func configureRestApi(e *echo.Echo, db *sql.DB) *echo.Echo {

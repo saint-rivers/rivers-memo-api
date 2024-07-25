@@ -6,8 +6,10 @@ import (
 	"fmt"
 	pb "rivers-memo-cli/generated/memo"
 	"strconv"
+	"strings"
 
 	"github.com/lib/pq"
+	// "github.com/lib/pq"
 )
 
 type TagSearchParam struct {
@@ -97,22 +99,26 @@ func unpackArray[S ~[]E, E any](s S) []any {
 	return r
 }
 
-func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
+func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo, error) {
 	q := `
-			SELECT DISTINCT id, link, title, description, image_url, ''
+			SELECT n.id, link, title, description, image_url, string_agg(
+				nt.tag, ','
+			) as tags
 			FROM note_tag nt
 			JOIN note n ON n.id = nt.note
 			WHERE id < $1
 			AND tag = ANY($2)
+			GROUP BY n.id
 			ORDER BY id desc
 			LIMIT $3`
-	rows, err := db.Query(q, req.Last, pq.Array(req.Tags), req.Size)
+
+	rows, err := db.Query(q, req.Last, pq.Array(req.Tags), req.Size) //, req.Last, pq.Array(req.Tags), req.Size)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var memos []pb.MemoReply
+	var memos []*pb.Memo
 
 	for rows.Next() {
 		var m Memo
@@ -120,12 +126,13 @@ func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest)
 		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
 			return nil, err
 		}
+		tags := strings.Split(tag, ",")
 		memos = append(
 			memos,
-			pb.MemoReply{
+			&pb.Memo{
 				Id:          m.ID,
 				Link:        m.Link,
-				Tags:        nil,
+				Tags:        tags,
 				Title:       m.Title,
 				Description: m.Description,
 				ImageUrl:    m.ImageUrl,
@@ -135,11 +142,15 @@ func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest)
 	return memos, nil
 }
 
-func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoReply, error) {
+func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo, error) {
 	q := `
-			SELECT id, link, title, description, image_url, ''
-			FROM note
+			SELECT n.id, link, title, description, image_url, string_agg(
+				nt.tag, ','
+			) AS tags
+			FROM note_tag nt
+			JOIN note n ON n.id = nt.note
 			WHERE id < $1
+			GROUP BY n.id
 			ORDER BY id desc
 			LIMIT $2`
 
@@ -148,7 +159,7 @@ func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoRe
 		return nil, err
 	}
 	defer rows.Close()
-	var memos []pb.MemoReply
+	var memos []*pb.Memo
 
 	for rows.Next() {
 		var m Memo
@@ -156,12 +167,13 @@ func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]pb.MemoRe
 		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
 			return nil, err
 		}
+		tags := strings.Split(tag, ",")
 		memos = append(
 			memos,
-			pb.MemoReply{
+			&pb.Memo{
 				Id:          m.ID,
 				Link:        m.Link,
-				Tags:        nil,
+				Tags:        tags,
 				Title:       m.Title,
 				Description: m.Description,
 				ImageUrl:    m.ImageUrl,

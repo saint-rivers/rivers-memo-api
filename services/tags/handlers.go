@@ -9,7 +9,7 @@ import (
 )
 
 func ConfigRoutes(e *echo.Echo, db *sql.DB) {
-	e.GET("/tags", func(c echo.Context) error {
+	e.GET("/api/v1/tags", func(c echo.Context) error {
 		tags, err := getTags(db)
 		if err != nil {
 			return c.JSON(http.StatusBadRequest, api.GenericError())

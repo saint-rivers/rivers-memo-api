@@ -5,6 +5,13 @@ type Message struct {
 	Msg    string
 }
 
+func SuccessMessage(msg string) Message {
+	return Message{
+		Status: 200,
+		Msg:    msg,
+	}
+}
+
 func GenericError() Message {
 	return Message{
 		Status: 500,
