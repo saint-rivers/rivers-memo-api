@@ -26,6 +26,18 @@ type MemoResponse struct {
 	Tags []string
 }
 
+type PageRequest struct {
+	Last int64    `json:"last,omitempty"`
+	Size int32    `json:"size,omitempty"`
+	Tags []string `json:"tags,omitempty"`
+}
+
+type MemoSearchRequest struct {
+	Key  string `param:"key" validate:"required"`
+	Last int32  `query:"last"`
+	Size int32  `query:"size" validate:"required"`
+}
+
 func ReadMessageByRelativeIndex(ctx context.Context, db *sql.DB, params *MemoReadParam) (int, error) {
 	query := "select id from note order by id desc limit 1 offset $1"
 	var id int
@@ -99,18 +111,24 @@ func unpackArray[S ~[]E, E any](s S) []any {
 	return r
 }
 
-func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo, error) {
+func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *PageRequest) ([]*pb.Memo, error) {
 	q := `
-			SELECT n.id, link, title, description, image_url, string_agg(
-				nt.tag, ','
-			) as tags
-			FROM note_tag nt
-			JOIN note n ON n.id = nt.note
-			WHERE id < $1
-			AND tag = ANY($2)
-			GROUP BY n.id
-			ORDER BY id desc
-			LIMIT $3`
+WITH s AS (
+  SELECT distinct id, link, title, description, image_url
+  FROM note n
+  INNER JOIN note_tag nt 
+  ON nt.note = n.id
+  WHERE id < $1
+  AND tag = any($2)
+  ORDER BY id DESC
+  LIMIT $3
+)
+SELECT  s.id, s.link, s.title, s.description, image_url, coalesce(string_agg(nt.tag, ','), '') AS tags 
+FROM s JOIN note_tag nt
+ON s.id = nt.note
+GROUP BY s.id, s.link, s.title, s.description, s.image_url
+ORDER BY id DESC
+	`
 
 	rows, err := db.Query(q, req.Last, pq.Array(req.Tags), req.Size) //, req.Last, pq.Array(req.Tags), req.Size)
 	if err != nil {
@@ -126,7 +144,12 @@ func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest)
 		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
 			return nil, err
 		}
-		tags := strings.Split(tag, ",")
+		var tags []string
+		if tag == "" {
+			tags = []string{}
+		} else {
+			tags = strings.Split(tag, ",")
+		}
 		memos = append(
 			memos,
 			&pb.Memo{
@@ -142,17 +165,16 @@ func GetMemosWithTagFilter(ctx context.Context, db *sql.DB, req *pb.PageRequest)
 	return memos, nil
 }
 
-func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo, error) {
+func GetMemos(ctx context.Context, db *sql.DB, req *PageRequest) ([]*pb.Memo, error) {
 	q := `
-			SELECT n.id, link, title, description, image_url, string_agg(
-				nt.tag, ','
-			) AS tags
-			FROM note_tag nt
-			JOIN note n ON n.id = nt.note
-			WHERE id < $1
-			GROUP BY n.id
-			ORDER BY id desc
-			LIMIT $2`
+select s.id, s.link, s.title, s.description, image_url, coalesce(string_agg(nt.tag, ','), '') AS tags
+from note s
+left join note_tag nt
+on s.id = nt.note
+where id < $1
+group by s.id, s.link, s.title, s.description
+order by id desc
+limit $2`
 
 	rows, err := db.Query(q, req.Last, req.Size)
 	if err != nil {
@@ -167,7 +189,12 @@ func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo,
 		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl, &tag); err != nil {
 			return nil, err
 		}
-		tags := strings.Split(tag, ",")
+		var tags []string
+		if tag == "" {
+			tags = []string{}
+		} else {
+			tags = strings.Split(tag, ",")
+		}
 		memos = append(
 			memos,
 			&pb.Memo{
@@ -181,4 +208,41 @@ func GetMemos(ctx context.Context, db *sql.DB, req *pb.PageRequest) ([]*pb.Memo,
 		)
 	}
 	return memos, nil
+}
+
+func SearchMemo(ctx context.Context, db *sql.DB, req *MemoSearchRequest) ([]*pb.Memo, error) {
+	q := `
+	select s.id, s.link, s.title, s.description, image_url
+	from note s
+	where title || link ilike CONCAT('%', cast($1 as varchar), '%')
+	and id < $2
+	order by id desc
+	limit $3
+	`
+	rows, err := db.QueryContext(ctx, q, req.Key, req.Last, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var memos []*pb.Memo
+
+	for rows.Next() {
+		var m Memo
+		if err := rows.Scan(&m.ID, &m.Link, &m.Title, &m.Description, &m.ImageUrl); err != nil {
+			return nil, err
+		}
+		memos = append(
+			memos,
+			&pb.Memo{
+				Id:          m.ID,
+				Link:        m.Link,
+				Tags:        []string{},
+				Title:       m.Title,
+				Description: m.Description,
+				ImageUrl:    m.ImageUrl,
+			},
+		)
+	}
+	return memos, nil
+
 }

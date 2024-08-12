@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"log"
+
+	"github.com/lib/pq"
 )
 
 type MemoParams struct {
@@ -17,6 +19,16 @@ type MemoParams struct {
 type TagParams struct {
 	ID   int
 	Tags []string
+}
+
+func RemoveTag(ctx context.Context, db *sql.DB, params *TagParams) error {
+	q := `DELETE FROM note_tag WHERE note = $1 AND tag = any($2)`
+	_, err := db.ExecContext(ctx, q, params.ID, pq.Array(params.Tags))
+	if err != nil {
+		return err
+	}
+	log.Printf("removed tag (%s) from (%d)", params.Tags, params.ID)
+	return nil
 }
 
 func AppendTag(ctx context.Context, db *sql.DB, params *TagParams) error {
@@ -40,13 +52,12 @@ func AppendTag(ctx context.Context, db *sql.DB, params *TagParams) error {
 
 func CreateMemo(ctx context.Context, db *sql.DB, params *MemoParams) error {
 	query := `
-	INSERT INTO note(id, link, title, description, image_url) 
-	VALUES($1, $2, $3, $4, $5)`
+	INSERT INTO note(link, title, description, image_url) 
+	VALUES($1, $2, $3, $4)`
 
 	insert, err := db.ExecContext(
 		ctx,
 		query,
-		params.ID,
 		params.ChannelMessage,
 		params.Title,
 		params.Description,
@@ -75,5 +86,19 @@ func UpdateMemo(ctx context.Context, db *sql.DB, image *string, title *string, d
 		log.Println(err.Error())
 		return err
 	}
+	return nil
+}
+
+func DeleteMemo(ctx context.Context, db *sql.DB, id int64) error {
+	q := `
+	delete from note 
+	where id = $1`
+
+	_, err := db.Exec(q, id)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+
 	return nil
 }

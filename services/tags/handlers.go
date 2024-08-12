@@ -8,6 +8,8 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+type Tag string
+
 func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 	e.GET("/api/v1/tags", func(c echo.Context) error {
 		tags, err := getTags(db)
@@ -17,8 +19,6 @@ func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 		return c.JSON(http.StatusOK, tags)
 	})
 }
-
-type Tag string
 
 func getTags(db *sql.DB) ([]Tag, error) {
 	q := `

@@ -20,9 +20,9 @@ import (
 )
 
 type CreateLinkMemoParams struct {
-	ID             int
-	ChannelMessage string
-	Tags           []string
+	// ID             int      `json:"id"`
+	ChannelMessage string   `form:"message" json:"message"`
+	Tags           []string `form:"tags" json:"tags"`
 }
 
 type Memo struct {
@@ -38,19 +38,23 @@ type MemoServer struct {
 	pb.UnimplementedMemoServiceServer
 }
 
-func (s *MemoServer) GetMemos(ctx context.Context, in *pb.PageRequest) (*pb.MemoReply, error) {
+type TagsUpdateRequest struct {
+	Removed []string `query:"removed"`
+	Added   []string `query:"added"`
+}
+
+func (s *MemoServer) GetMemos(ctx context.Context, in *PageRequest) (*pb.MemoReply, error) {
 	var memos []*pb.Memo
 	var err error
 
-	last := "999999"
-	if in.Last == nil {
-		in.Last = &last
+	if in.Last == 0 {
+		in.Last = 999999
 	}
 	if len(in.Tags) == 0 {
 		memos, err = GetMemos(
 			context.Background(),
 			client.Persistence,
-			&pb.PageRequest{Last: in.Last, Size: in.Size, Tags: []string{}},
+			&PageRequest{Last: in.Last, Size: in.Size, Tags: []string{}},
 		)
 		if err != nil {
 			log.Println(err.Error())
@@ -59,7 +63,7 @@ func (s *MemoServer) GetMemos(ctx context.Context, in *pb.PageRequest) (*pb.Memo
 		memos, err = GetMemosWithTagFilter(
 			context.Background(),
 			client.Persistence,
-			&pb.PageRequest{Last: in.Last, Size: in.Size, Tags: in.Tags},
+			&PageRequest{Last: in.Last, Size: in.Size, Tags: in.Tags},
 		)
 		if err != nil {
 			log.Println(err.Error())
@@ -80,9 +84,11 @@ func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 		}
 		size := int32(s)
 
-		last := c.QueryParam("last")
-		if last == "" {
-			last = "999999"
+		lastreq := c.QueryParam("last")
+
+		last, err := strconv.ParseInt(lastreq, 10, 64)
+		if last == 0 {
+			last = 999999
 		}
 
 		tags := c.QueryParams()["tag"]
@@ -91,49 +97,49 @@ func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 			memos, err = GetMemos(
 				context.Background(),
 				db,
-				&pb.PageRequest{Last: &last, Size: size, Tags: []string{}},
+				&PageRequest{Last: last, Size: size, Tags: []string{}},
 			)
 		} else {
 			memos, err = GetMemosWithTagFilter(
 				context.Background(),
 				db,
-				&pb.PageRequest{Last: &last, Size: size, Tags: tags},
+				&PageRequest{Last: last, Size: size, Tags: tags},
 			)
 		}
 
 		if err != nil {
 			log.Println(err.Error())
 		}
-
 		return c.JSON(http.StatusOK, memos)
 	})
 
-	// e.GET("/scripts/memo", func(c echo.Context) error {
-	// 	last := "999999"
-	// 	memos, err := GetMemos(
-	// 		context.Background(),
-	// 		db,
-	// 		&pb.PageRequest{Last: &last, Size: 20},
-	// 	)
-	// 	if err != nil {
-	// 		print(err)
-	// 	}
+	e.PUT("/api/v1/memo/:id/tags", func(c echo.Context) error {
+		mId := c.Param("id")
+		id, err := strconv.Atoi(mId)
 
-	// 	for i := range memos {
-	// 		m := &memos[i]
-	// 		ogData, err := og.ExtractOGData(m.GetLink())
-	// 		if err != nil {
-	// 			print(err)
-	// 			continue
-	// 		}
-	// 		_ = UpdateMemo(
-	// 			context.Background(),
-	// 			db,
-	// 			&ogData.Images[0].URL, &ogData.Title, &ogData.Description, m.Link,
-	// 		)
-	// 	}
-	// 	return c.JSON(http.StatusOK, memos)
-	// })
+		var req TagsUpdateRequest
+		err = c.Bind(&req)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, api.BadRequestError("required at least two empty arrays"))
+		}
+
+		if len(req.Removed) > 0 {
+			err = RemoveTag(context.Background(), db, &TagParams{ID: id, Tags: req.Removed})
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, api.BadRequestError("remove tags failed"))
+			}
+		}
+		log.Println(req.Added)
+		if len(req.Added) > 0 {
+			err = AppendTag(context.Background(), db, &TagParams{ID: id, Tags: req.Added})
+			if err != nil {
+				return c.JSON(http.StatusBadRequest, api.BadRequestError("append tags failed"))
+			}
+		}
+
+		return c.JSON(http.StatusOK, api.SuccessMessage("updated successfully"))
+	})
+
 	e.POST("/api/v1/memo/:id/tags", func(c echo.Context) error {
 		mId := strings.Split(c.Request().URL.Path, "/")[4]
 
@@ -150,6 +156,61 @@ func ConfigRoutes(e *echo.Echo, db *sql.DB) {
 		msg := fmt.Sprintf("updated memo: %s", mId)
 		return c.JSON(http.StatusOK, api.SuccessMessage(msg))
 	})
+
+	e.POST("/api/v1/memo", func(c echo.Context) error {
+		req := new(CreateLinkMemoParams)
+		if err := c.Bind(req); err != nil {
+			msg := fmt.Sprintf("invalid request body")
+			return c.JSON(http.StatusBadRequest, api.BadRequestError(msg))
+		}
+		err := insertMemo(db, req)
+		if err != nil {
+			msg := fmt.Sprintf("unabel to insert message")
+			return c.JSON(http.StatusBadRequest, api.BadRequestError(msg))
+		}
+		msg := fmt.Sprintf("successfully inserted message")
+		return c.JSON(http.StatusOK, api.SuccessMessage(msg))
+	})
+
+	e.DELETE("/api/v1/memo/:id", func(c echo.Context) error {
+		mId := strings.Split(c.Request().URL.Path, "/")[4]
+		id, err := strconv.ParseInt(mId, 10, 64)
+		if err != nil {
+			msg := fmt.Sprintf("invalid id")
+			return c.JSON(http.StatusBadRequest, api.NotFoundError(msg))
+		}
+		err = DeleteMemo(context.Background(), db, id)
+		if err != nil {
+			msg := fmt.Sprintf("id not found. unable to delete")
+			return c.JSON(http.StatusBadRequest, api.NotFoundError(msg))
+		}
+		msg := fmt.Sprintf("successfully deleted message")
+		return c.JSON(http.StatusOK, api.SuccessMessage(msg))
+	})
+
+	e.GET("/api/v1/memo/:key", func(c echo.Context) error {
+		req := new(MemoSearchRequest)
+
+		if err := c.Bind(req); err != nil {
+			msg := fmt.Sprintf("invalid request")
+			return c.JSON(http.StatusBadRequest, api.BadRequestError(msg))
+		}
+
+		if req.Last == 0 {
+			req.Last = 9999
+		}
+
+		payload, err := SearchMemo(context.Background(), db, req)
+		if err != nil {
+			msg := fmt.Sprintf(err.Error())
+			return c.JSON(http.StatusBadRequest, api.NotFoundError(msg))
+		}
+		return c.JSON(http.StatusOK, payload)
+	})
+}
+
+type MemoSearchPath struct {
+	Key string `param:"key" json:"key"`
 }
 
 func ProcessChanncelMessage(db *sql.DB, param *CreateLinkMemoParams) error {
@@ -181,27 +242,44 @@ func ProcessChanncelMessage(db *sql.DB, param *CreateLinkMemoParams) error {
 			}
 		}
 	case Link:
-		link := param.ChannelMessage
-		ogData := make(chan *opengraph.OpenGraph)
-		go func() {
-			v, _ := og.ExtractOGData(link)
-			ogData <- v
-		}()
-
-		ogd := <-ogData
-		log.Println(ogd.Images[0].URL)
-		CreateMemo(context.Background(), db,
-			&MemoParams{
-				ID:             param.ID,
-				ChannelMessage: link,
-				Title:          ogd.Title,
-				Description:    ogd.Description,
-				Image:          ogd.Images[0].URL,
-			})
+		insertMemo(db, param)
 
 	case Message:
 
 	}
 
 	return nil
+}
+
+func insertMemo(db *sql.DB, param *CreateLinkMemoParams) error {
+	link := param.ChannelMessage
+	ogData := make(chan *opengraph.OpenGraph)
+	go func() {
+		v, _ := og.ExtractOGData(link)
+		ogData <- v
+	}()
+
+	ogd := <-ogData
+	var memo *MemoParams
+	if len(ogd.Images) > 0 {
+		log.Println(ogd.Images[0].URL)
+		memo = &MemoParams{
+			// ID:             param.ID,
+			ChannelMessage: link,
+			Title:          ogd.Title,
+			Description:    ogd.Description,
+			Image:          ogd.Images[0].URL,
+		}
+	} else {
+		log.Println("no image")
+		memo = &MemoParams{
+			// ID:             param.ID,
+			ChannelMessage: link,
+			Title:          ogd.Title,
+			Description:    ogd.Description,
+			Image:          "",
+		}
+	}
+	err := CreateMemo(context.Background(), db, memo)
+	return err
 }
